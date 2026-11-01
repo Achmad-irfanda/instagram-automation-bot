@@ -1,0 +1,28 @@
+{
+  "name": "instagram-automation-bot",
+  "version": "1.0.0",
+  "description": "Instagram Automation Bot with Playwright, Date-based Crawling, and Google Drive Sync",
+  "main": "run-batch.js",
+  "scripts": {
+    "start": "node run-batch.js",
+    "login": "node login.js",
+    "sync-drive": "node google-drive.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Achmad-irfanda/instagram-automation-bot.git"
+  },
+  "keywords": [
+    "instagram",
+    "automation",
+    "bot",
+    "playwright",
+    "google-drive",
+    "crawler"
+  ],
+  "author": "Achmad Irfanda",
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.64.1"
+  }
+}

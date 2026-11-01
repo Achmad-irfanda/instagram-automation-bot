@@ -1,0 +1,6 @@
+{
+  "clientId": "YOUR_GCP_CLIENT_ID.apps.googleusercontent.com",
+  "clientSecret": "YOUR_GCP_CLIENT_SECRET",
+  "refreshToken": "YOUR_GCP_REFRESH_TOKEN",
+  "parentFolderId": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
+}

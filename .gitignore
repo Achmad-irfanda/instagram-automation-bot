@@ -1,0 +1,10 @@
+node_modules/
+ig-session/
+screenshots/
+.DS_Store
+gdrive-auth.json
+client_secret*.json
+*.log
+.env
+
+
