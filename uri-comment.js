@@ -53,6 +53,8 @@ const comments = [
 
 
 const urlPost = [
+  "https://www.instagram.com/reels/DcGp0b2pZoD/",
+  "https://www.instagram.com/reels/De6q-vLzmU5/"
 ];
 
 module.exports = { comments, urlPost };

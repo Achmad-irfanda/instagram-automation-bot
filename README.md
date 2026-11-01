@@ -134,8 +134,8 @@ Jika Anda sudah memiliki daftar URL postingan sendiri:
 2. Masukkan link postingan pada array `urlPost`:
    ```javascript
    const urlPost = [
-     "https://www.instagram.com/p/DfHNPOiCTjb/",
-     "https://www.instagram.com/p/DfEvClTiaOe/"
+     "https://www.instagram.com/reels/DcGp0b2pZoD/",
+     "https://www.instagram.com/reels/De6q-vLzmU5/"
    ];
    ```
 3. Jalankan bot batch:
