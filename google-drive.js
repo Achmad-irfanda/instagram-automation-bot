@@ -32,17 +32,26 @@ function getParentFolderId() {
 }
 
 /**
- * Membersihkan folder bulan lokal jika sudah kosong (setelah file-file ter-upload)
+ * Membersihkan folder-folder lokal secara rekursif jika sudah kosong (setelah file-file ter-upload)
+ * Mulai dari folder tanggal -> folder akun -> folder bulan hingga batas folder 'screenshots'
  */
-function cleanupEmptyDir(dirPath) {
+function cleanupEmptyDir(startDirPath) {
     try {
-        const screenshotsRoot = path.join(__dirname, 'screenshots');
-        // Jangan hapus folder root 'screenshots', hanya subfoldernya saja jika kosong
-        if (path.resolve(dirPath) !== path.resolve(screenshotsRoot)) {
-            const files = fs.readdirSync(dirPath);
-            if (files.length === 0) {
-                fs.rmdirSync(dirPath);
-                console.log(`   📁 Folder lokal kosong "${path.basename(dirPath)}" dibersihkan.`);
+        const screenshotsRoot = path.resolve(__dirname, 'screenshots');
+        let currentDir = path.resolve(startDirPath);
+
+        while (currentDir !== screenshotsRoot && currentDir.startsWith(screenshotsRoot)) {
+            if (fs.existsSync(currentDir)) {
+                const files = fs.readdirSync(currentDir);
+                if (files.length === 0) {
+                    fs.rmdirSync(currentDir);
+                    console.log(`   📁 Folder lokal kosong "${path.basename(currentDir)}" dibersihkan.`);
+                    currentDir = path.dirname(currentDir);
+                } else {
+                    break; // Masih ada file atau folder lain, berhenti
+                }
+            } else {
+                currentDir = path.dirname(currentDir);
             }
         }
     } catch (e) {
@@ -129,15 +138,42 @@ function driveApiRequest(options, postBody = null) {
 }
 
 /**
- * Mencari apakah folder bulan sudah ada di folder sharing Google Drive.
- * Jika belum ada, otomatis membuat folder bulan baru.
+ * Mengubah input hierarki folder menjadi array string terurut:
+ * Contoh: [ "Oktober 2026", "interactivetech", "2026-10-30" ]
  */
-async function findOrCreateMonthFolder(targetFolderName, parentFolderId = null) {
+function normalizeFolderChain(input) {
+    if (!input) return [];
+    if (Array.isArray(input)) {
+        return input.map(item => String(item).trim()).filter(Boolean);
+    }
+    if (typeof input === 'object') {
+        const chain = [];
+        const month = input.month || input.folderName;
+        const account = input.account || input.accountName;
+        const date = input.date || input.dateFolderName || input.postDate;
+        if (month) chain.push(String(month).trim());
+        if (account) chain.push(String(account).trim());
+        if (date) chain.push(String(date).trim());
+        return chain;
+    }
+    if (typeof input === 'string') {
+        return [input.trim()];
+    }
+    return [];
+}
+
+/**
+ * Mencari apakah folder dengan nama tertentu sudah ada di dalam parentFolderId.
+ * Jika sudah ada, mengembalikan ID-nya (reuse / tidak buat duplikat).
+ * Jika belum ada, otomatis membuat folder baru.
+ */
+async function findOrCreateFolder(targetFolderName, parentFolderId = null) {
     if (!parentFolderId) parentFolderId = getParentFolderId();
     const token = await getAccessToken();
 
     // 1. Ambil semua folder yang ada di dalam parentFolderId
-    const query = encodeURIComponent(`'${parentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
+    const safeParent = parentFolderId.replace(/'/g, "\\'");
+    const query = encodeURIComponent(`'${safeParent}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
     const listRes = await driveApiRequest({
         hostname: 'www.googleapis.com',
         path: `/drive/v3/files?q=${query}&fields=files(id,name,mimeType)`,
@@ -148,41 +184,31 @@ async function findOrCreateMonthFolder(targetFolderName, parentFolderId = null) 
     });
 
     const existingFolders = listRes.files || [];
-
-    // Normalisasi pencocokan nama folder
-    // Contoh: "November 2024" dicocokkan dengan "november 2024", "November", atau "november"
     const targetNorm = targetFolderName.toLowerCase().trim();
-    const targetMonth = targetNorm.split(' ')[0]; // Ambil kata pertama (nama bulan)
 
-    let matchedFolder = null;
-
-    // A. Cek kecocokan persis
+    // A. Cek kecocokan persis (case-insensitive)
     for (const folder of existingFolders) {
-        const nameNorm = folder.name.toLowerCase().trim();
-        if (nameNorm === targetNorm) {
-            matchedFolder = folder;
-            break;
+        if (folder.name.toLowerCase().trim() === targetNorm) {
+            console.log(`   📁 Folder Google Drive ditemukan: "${folder.name}" (ID: ${folder.id})`);
+            return folder.id;
         }
     }
 
-    // B. Cek kecocokan nama bulan saja jika persis belum ketemu (misal Drive ada folder "november" atau "agustus")
-    if (!matchedFolder) {
+    // B. Cek kecocokan nama bulan jika format bulan (misal "Oktober 2026" vs "Oktober")
+    const targetMonth = targetNorm.split(' ')[0];
+    const months = ['januari', 'februari', 'maret', 'april', 'mei', 'juni', 'juli', 'agustus', 'september', 'oktober', 'november', 'desember'];
+    if (months.includes(targetMonth)) {
         for (const folder of existingFolders) {
             const nameNorm = folder.name.toLowerCase().trim();
             if (nameNorm === targetMonth || nameNorm.startsWith(targetMonth)) {
-                matchedFolder = folder;
-                break;
+                console.log(`   📁 Folder Google Drive ditemukan (pencocokan bulan): "${folder.name}" (ID: ${folder.id})`);
+                return folder.id;
             }
         }
     }
 
-    if (matchedFolder) {
-        console.log(`📁 Folder Google Drive ditemukan: "${matchedFolder.name}" (ID: ${matchedFolder.id})`);
-        return matchedFolder.id;
-    }
-
-    // Jika belum ada, buat folder bulan baru di dalam parentFolderId
-    console.log(`📁 Folder bulan "${targetFolderName}" belum ada di Drive. Membuat folder baru...`);
+    // C. Jika belum ada, buat folder baru di dalam parentFolderId
+    console.log(`   📁 Folder "${targetFolderName}" belum ada di Drive. Membuat folder baru...`);
     const createRes = await driveApiRequest({
         hostname: 'www.googleapis.com',
         path: '/drive/v3/files',
@@ -197,15 +223,27 @@ async function findOrCreateMonthFolder(targetFolderName, parentFolderId = null) 
         parents: [parentFolderId]
     }));
 
-    console.log(`✅ Berhasil membuat folder baru: "${targetFolderName}" (ID: ${createRes.id})`);
+    console.log(`   ✅ Berhasil membuat folder: "${targetFolderName}" (ID: ${createRes.id})`);
     return createRes.id;
 }
 
 /**
- * Upload satu file screenshot ke folder bulan di Google Drive.
+ * Backward-compatibility helper untuk folder bulan
+ */
+async function findOrCreateMonthFolder(targetFolderName, parentFolderId = null) {
+    if (!parentFolderId) parentFolderId = getParentFolderId();
+    return await findOrCreateFolder(targetFolderName, parentFolderId);
+}
+
+/**
+ * Upload satu file screenshot ke hierarki folder bertingkat di Google Drive:
+ * Level 1: Bulan & Tahun
+ * Level 2: ID Akun Instagram
+ * Level 3: Tanggal Postingan
+ *
  * Otomatis mengecek jika file dengan nama yang sama sudah pernah ter-upload.
  */
-async function uploadScreenshot(filePath, folderName, parentFolderId = null) {
+async function uploadScreenshot(filePath, folderHierarchy, parentFolderId = null) {
     if (!parentFolderId) parentFolderId = getParentFolderId();
     if (!fs.existsSync(filePath)) {
         throw new Error(`File tidak ditemukan: ${filePath}`);
@@ -214,10 +252,19 @@ async function uploadScreenshot(filePath, folderName, parentFolderId = null) {
     const fileName = path.basename(filePath);
     const token = await getAccessToken();
 
-    // 1. Pastikan folder bulan sudah tersedia (ambil ID yang sudah ada atau buat baru)
-    const targetFolderId = await findOrCreateMonthFolder(folderName, parentFolderId);
+    // 1. Buat / telusuri rantai folder bertingkat (Bulan -> Akun -> Tanggal)
+    const folderChain = normalizeFolderChain(folderHierarchy);
+    let targetFolderId = parentFolderId;
+    let pathDisplay = [];
 
-    // 2. Cek apakah file dengan nama yang sama sudah ada di dalam folder tersebut
+    for (const folderName of folderChain) {
+        targetFolderId = await findOrCreateFolder(folderName, targetFolderId);
+        pathDisplay.push(folderName);
+    }
+
+    const folderPathText = pathDisplay.join(' / ') || 'Root';
+
+    // 2. Cek apakah file dengan nama yang sama sudah ada di dalam folder tujuan tersebut
     const checkFileQuery = encodeURIComponent(`'${targetFolderId}' in parents and name = '${fileName}' and trashed = false`);
     const fileListRes = await driveApiRequest({
         hostname: 'www.googleapis.com',
@@ -244,7 +291,7 @@ async function uploadScreenshot(filePath, folderName, parentFolderId = null) {
         return {
             id: existing.id,
             fileName: fileName,
-            folderName: folderName,
+            folderPath: folderPathText,
             folderId: targetFolderId,
             alreadyExisted: true,
             link: existing.webViewLink
@@ -252,7 +299,7 @@ async function uploadScreenshot(filePath, folderName, parentFolderId = null) {
     }
 
     // 3. Upload file menggunakan multipart upload
-    console.log(`☁️  Mengunggah "${fileName}" ke folder "${folderName}" di Google Drive...`);
+    console.log(`☁️  Mengunggah "${fileName}" ke [${folderPathText}] di Google Drive...`);
     const fileBuffer = fs.readFileSync(filePath);
     const boundary = '-------GoogleDriveUploadBoundary' + Date.now();
 
@@ -297,7 +344,7 @@ async function uploadScreenshot(filePath, folderName, parentFolderId = null) {
     return {
         id: uploadRes.id,
         fileName: fileName,
-        folderName: folderName,
+        folderPath: folderPathText,
         folderId: targetFolderId,
         alreadyExisted: false,
         link: uploadRes.webViewLink
@@ -305,7 +352,34 @@ async function uploadScreenshot(filePath, folderName, parentFolderId = null) {
 }
 
 /**
- * Scan seluruh folder `screenshots/` dan upload semua file yang ada
+ * Mencari seluruh file screenshot di direktori screenshots/ beserta hierarki subfoldernya
+ */
+function getAllScreenshotFiles(dirPath, rootDir = null) {
+    if (!rootDir) rootDir = dirPath;
+    let results = [];
+    if (!fs.existsSync(dirPath)) return results;
+
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+            results = results.concat(getAllScreenshotFiles(fullPath, rootDir));
+        } else if (entry.isFile() && entry.name.endsWith('.png')) {
+            const relPath = path.relative(rootDir, fullPath);
+            const pathParts = relPath.split(path.sep);
+            const folderChain = pathParts.slice(0, -1);
+            results.push({
+                filePath: fullPath,
+                fileName: entry.name,
+                folderChain: folderChain.length > 0 ? folderChain : [new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })]
+            });
+        }
+    }
+    return results;
+}
+
+/**
+ * Scan seluruh folder `screenshots/` dan upload semua file yang ada sesuai hierarki foldernya
  */
 async function syncAllScreenshots() {
     const screenshotsDir = path.join(__dirname, 'screenshots');
@@ -318,43 +392,28 @@ async function syncAllScreenshots() {
     console.log(`\n🚀 SINKRONISASI SCREENSHOT KE GOOGLE DRIVE`);
     console.log(`📂 Folder tujuan utama ID: ${parentFolderId}\n`);
 
-    const entries = fs.readdirSync(screenshotsDir, { withFileTypes: true });
+    const items = getAllScreenshotFiles(screenshotsDir);
     let totalUploaded = 0;
     let totalSkipped = 0;
 
-    for (const entry of entries) {
-        if (entry.isDirectory()) {
-            const monthFolderName = entry.name;
-            const subDirPath = path.join(screenshotsDir, monthFolderName);
-            const files = fs.readdirSync(subDirPath).filter(f => f.endsWith('.png'));
+    if (items.length === 0) {
+        console.log('ℹ️  Tidak ada file screenshot lokal yang ditemukan untuk disinkronkan.');
+        return;
+    }
 
-            if (files.length > 0) {
-                console.log(`\n--------------------------------------------------`);
-                console.log(`📂 Memproses Folder Bulan: "${monthFolderName}" (${files.length} file)`);
-                console.log(`--------------------------------------------------`);
+    console.log(`📋 Ditemukan ${items.length} file screenshot lokal untuk disinkronkan.\n`);
 
-                for (const file of files) {
-                    const filePath = path.join(subDirPath, file);
-                    try {
-                        const res = await uploadScreenshot(filePath, monthFolderName);
-                        if (res.alreadyExisted) totalSkipped++;
-                        else totalUploaded++;
-                    } catch (err) {
-                        console.error(`❌ Gagal upload ${file}:`, err.message);
-                    }
-                }
-            }
-        } else if (entry.isFile() && entry.name.endsWith('.png')) {
-            // File PNG langsung di root folder screenshots
-            const filePath = path.join(screenshotsDir, entry.name);
-            const fallbackMonth = new Date().toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
-            try {
-                const res = await uploadScreenshot(filePath, fallbackMonth);
-                if (res.alreadyExisted) totalSkipped++;
-                else totalUploaded++;
-            } catch (err) {
-                console.error(`❌ Gagal upload ${entry.name}:`, err.message);
-            }
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        console.log(`--------------------------------------------------`);
+        console.log(`[${i + 1}/${items.length}] Memproses file: ${item.fileName}`);
+        console.log(`   Hierarki: ${item.folderChain.join(' -> ')}`);
+        try {
+            const res = await uploadScreenshot(item.filePath, item.folderChain, parentFolderId);
+            if (res.alreadyExisted) totalSkipped++;
+            else totalUploaded++;
+        } catch (err) {
+            console.error(`❌ Gagal upload ${item.fileName}:`, err.message);
         }
     }
 
@@ -373,6 +432,7 @@ if (require.main === module) {
 
 module.exports = {
     getAccessToken,
+    findOrCreateFolder,
     findOrCreateMonthFolder,
     uploadScreenshot,
     syncAllScreenshots

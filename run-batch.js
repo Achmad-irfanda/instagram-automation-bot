@@ -23,6 +23,8 @@ function pickRandomComment(list, usedSet) {
 }
 
 (async () => {
+    const targetAccountCli = process.argv[2] && !process.argv[2].startsWith('-') ? process.argv[2] : null;
+
     if (!urlPost || urlPost.length === 0) {
         console.log('⚠️ Daftar urlPost di uri-comment.js masih kosong! Silakan tambahkan URL terlebih dahulu.');
         process.exit(1);
@@ -30,9 +32,13 @@ function pickRandomComment(list, usedSet) {
 
     console.log(`\n===============================================================`);
     console.log(`🚀 MEMULAI OTOMASI INSTAGRAM BATCH`);
+    if (targetAccountCli) {
+        console.log(`👤 Target Akun (Override): @${targetAccountCli}`);
+    }
     console.log(`📋 Total URL postingan: ${urlPost.length}`);
     console.log(`💬 Total variasi komentar: ${comments ? comments.length : 0}`);
     console.log(`⏱️  Jeda antar postingan: ${MIN_DELAY_SECONDS} - ${MAX_DELAY_SECONDS} detik`);
+    console.log(`📁 Struktur Folder: [Bulan Tahun] -> [ID Akun] -> [Tanggal Post]`);
     console.log(`===============================================================\n`);
 
     const sessionPath = path.join(__dirname, 'ig-session');
@@ -64,19 +70,22 @@ function pickRandomComment(list, usedSet) {
         console.log(`---------------------------------------------------------------`);
 
         try {
-            const res = await processPost(page, rawUrl, comment, screenshotsDir);
+            const res = await processPost(page, rawUrl, comment, screenshotsDir, targetAccountCli);
+            const folderDisplay = `${res.folderName} -> @${res.accountName} -> ${res.dateFolderName}`;
             summary.push({
                 index: i + 1,
                 url: rawUrl,
                 status: 'SUKSES',
-                folder: res.folderName,
+                account: res.accountName,
+                date: res.dateFolderName,
+                folder: folderDisplay,
                 screenshot: res.file
             });
-            console.log(`✅ [${i + 1}/${urlPost.length}] Sukses selesai!`);
+            console.log(`✅ [${i + 1}/${urlPost.length}] Sukses selesai! (${folderDisplay})`);
 
-            // Upload otomatis ke Google Drive pada folder bulan yang sesuai
+            // Upload otomatis ke Google Drive pada hierarki folder: Bulan -> ID Akun -> Tanggal Post
             try {
-                const driveRes = await uploadScreenshot(res.file, res.folderName);
+                const driveRes = await uploadScreenshot(res.file, res.folderChain || [res.folderName, res.accountName, res.dateFolderName]);
                 if (driveRes.alreadyExisted) {
                     console.log(`   ℹ️ [Drive] File sudah ada di Google Drive (Dilewati).`);
                 } else {

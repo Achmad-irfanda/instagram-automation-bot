@@ -206,7 +206,7 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
         for (const item of apiPosts.values()) {
             if (item.postDate >= startDate && item.postDate <= endDate) {
                 console.log(`✅ COCOK: ${item.url} -> Tanggal: ${item.date}`);
-                collectedData.push({ url: item.url, date: item.date });
+                collectedData.push({ url: item.url, date: item.date, account: targetUsername });
             }
         }
 
@@ -242,9 +242,10 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
     if (autoRun && collectedData && collectedData.length > 0) {
         console.log(`\n===============================================================`);
         console.log(`🚀 [Auto-Run] Memulai eksekusi otomatis postingan yang baru di-crawl...`);
+        console.log(`👤 Target Akun: @${targetUsername}`);
         console.log(`===============================================================\n`);
         const { spawnSync } = require('child_process');
-        spawnSync('node', [path.join(__dirname, 'run-batch.js')], { stdio: 'inherit' });
+        spawnSync('node', [path.join(__dirname, 'run-batch.js'), targetUsername], { stdio: 'inherit' });
     } else if (!autoRun && collectedData && collectedData.length > 0) {
         console.log(`\n💡 Ingin langsung like, komen, & upload ke Drive otomatis setelah crawling?`);
         console.log(`   Tambahkan parameter '--run' di akhir perintah:`);

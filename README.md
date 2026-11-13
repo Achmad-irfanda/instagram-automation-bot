@@ -19,11 +19,14 @@ Dibuat & dikembangkan oleh: **Achmad Irfanda** ([@Achmad-irfanda](https://github
 - 🚀 **Batch Processing Cepat**: Membuka browser cukup 1 kali untuk memproses seluruh postingan berurutan secara mulus (*persistent session*).
 - 📅 **Date-based Crawler & Auto-Run**: Cukup tentukan rentang tanggal, bot otomatis mengumpulkan URL postingan, memasukkannya ke daftar, dan langsung mengeksekusinya (`--run`).
 - 🎲 **Smart Random Comments**: Memilih komentar bervariasi dari bank kalimat tanpa pengulangan kalimat yang sama secara beruntun.
-- 📁 **Grouping Screenshot per Bulan**: Screenshot dikelompokkan ke subfolder bulan & tahun asli postingan dibuat (contoh: `Oktober 2026/`).
+- 📁 **Struktur Folder Hierarkis Otomatis**: Screenshot bukti dikelompokkan secara terstruktur 3 level:
+  `[Bulan dan Tahun]` ➔ `[ID Akun / Username]` ➔ `[Tanggal Post]` ➔ `[Screenshot Bukti]`.
 - ☁️ **Integrasi Google Drive Cerdas**:
-  - Mengecek apakah folder bulan sudah ada di folder sharing Google Drive.
-  - Jika **sudah ada**, langsung memasukkan file ke dalam folder tersebut (*reuse*).
-  - Jika **belum ada**, otomatis membuat folder bulan baru di Drive.
+  - Mengecek apakah folder bulan sudah ada di Google Drive.
+  - Mengecek apakah folder ID akun Instagram target sudah ada di dalam folder bulan tersebut.
+  - Jika **sudah ada**, langsung masuk dan menggunakan folder tersebut (*reuse*).
+  - Jika **berbeda akun / belum ada**, otomatis membuat folder ID akun baru.
+  - Di dalam folder akun, membuat/mencocokkan folder tanggal post postingan.
   - Mencegah upload duplikat (*skip* jika file dengan nama sama sudah ada).
 - 🗑️ **Local Storage Auto-Cleanup**: Setelah screenshot sukses ter-upload ke Google Drive, file lokal dan subfolder kosong otomatis dihapus agar memori laptop tetap bersih 100%.
 - 🛡️ **Human-like Timing & Error Isolation**: Dilengkapi random delay (10–20 detik) untuk keamanan dari batas limit Instagram, serta penanganan error per URL agar bot tidak berhenti saat satu postingan bermasalah.

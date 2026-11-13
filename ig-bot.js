@@ -3,9 +3,9 @@ const path = require('path');
 const fs = require('fs');
 
 /**
- * Memproses 1 postingan Instagram: Buka -> Deteksi Tanggal -> Like -> Komentar -> Screenshot
+ * Memproses 1 postingan Instagram: Buka -> Deteksi Akun & Tanggal -> Like -> Komentar -> Screenshot
  */
-async function processPost(page, rawUrl, commentText, screenshotsDir) {
+async function processPost(page, rawUrl, commentText, screenshotsDir, targetAccount = null) {
     // Gunakan format /p/ agar kotak komentar selalu langsung tampil di sebelah kanan (bukan tersembunyi di mode Reels)
     const postUrl = rawUrl.trim().split('?')[0].replace('/reels/', '/p/').replace('/reel/', '/p/');
 
@@ -14,6 +14,7 @@ async function processPost(page, rawUrl, commentText, screenshotsDir) {
         month: 'long',
         year: 'numeric'
     });
+    let accountName = targetAccount ? targetAccount.trim().replace(/^@/, '') : null;
 
     console.log(`1. Membuka URL postingan: ${postUrl}`);
 
@@ -42,22 +43,62 @@ async function processPost(page, rawUrl, commentText, screenshotsDir) {
         await page.waitForTimeout(1000);
     }
 
-    // 📅 AMBIL TANGGAL & BULAN ASLI POSTINGAN
-    const rawDatetime = await page.evaluate(() => {
+    // 📅 AMBIL TANGGAL, BULAN, & ID AKUN (USERNAME) ASLI POSTINGAN
+    const postDetails = await page.evaluate(() => {
+        // 1. Ambil Datetime
+        let datetime = null;
         const postTimeLink = document.querySelector('a[href*="/p/"] time[datetime], a[href*="/reel/"] time[datetime]');
-        if (postTimeLink) return postTimeLink.getAttribute('datetime');
-
-        const allTimes = Array.from(document.querySelectorAll('time[datetime]'));
-        if (allTimes.length > 0) {
-            return allTimes[allTimes.length - 1].getAttribute('datetime');
+        if (postTimeLink) {
+            datetime = postTimeLink.getAttribute('datetime');
+        } else {
+            const allTimes = Array.from(document.querySelectorAll('time[datetime]'));
+            if (allTimes.length > 0) {
+                datetime = allTimes[allTimes.length - 1].getAttribute('datetime');
+            }
         }
-        return null;
-    }).catch(() => null);
 
-    if (rawDatetime) {
-        const dObj = new Date(rawDatetime);
+        // 2. Ambil ID Akun / Username pembuat postingan
+        let username = null;
+        const headerAuthor = document.querySelector('header a[role="link"], article header a');
+        if (headerAuthor) {
+            const href = headerAuthor.getAttribute('href');
+            if (href) {
+                const clean = href.replace(/^\/+|\/+$/g, '').split('/')[0].split('?')[0];
+                const blacklist = ['explore', 'reels', 'stories', 'direct', 'accounts', 'p', 'reel'];
+                if (clean && !blacklist.includes(clean.toLowerCase())) {
+                    username = clean;
+                }
+            }
+            if (!username && headerAuthor.textContent) {
+                const text = headerAuthor.textContent.trim();
+                if (text && !text.includes(' ') && text.length <= 30) {
+                    username = text;
+                }
+            }
+        }
+
+        // Fallback cek tag meta og:title jika di header belum ketemu
+        if (!username) {
+            const ogTitle = document.querySelector('meta[property="og:title"]');
+            if (ogTitle) {
+                const content = ogTitle.getAttribute('content') || '';
+                const match = content.match(/^([^•|:(@\n]+?)(?:\s+on Instagram|\s*\()/i);
+                if (match && match[1]) {
+                    const candidate = match[1].trim();
+                    if (!candidate.includes(' ') && candidate.length <= 30) {
+                        username = candidate;
+                    }
+                }
+            }
+        }
+
+        return { datetime, username };
+    }).catch(() => ({ datetime: null, username: null }));
+
+    if (postDetails && postDetails.datetime) {
+        const dObj = new Date(postDetails.datetime);
         if (!isNaN(dObj.getTime())) {
-            postDateISO = rawDatetime.split('T')[0];
+            postDateISO = postDetails.datetime.split('T')[0];
             folderName = dObj.toLocaleDateString('id-ID', {
                 month: 'long',
                 year: 'numeric'
@@ -65,6 +106,13 @@ async function processPost(page, rawUrl, commentText, screenshotsDir) {
             console.log(`   -> Bulan postingan: ${folderName} (${postDateISO})`);
         }
     }
+
+    if (!accountName && postDetails && postDetails.username) {
+        accountName = postDetails.username;
+    }
+    // Bersihkan karakter terlarang untuk nama folder
+    accountName = (accountName || 'akun_instagram').replace(/[^a-zA-Z0-9._-]/g, '').trim() || 'akun_instagram';
+    console.log(`   -> ID Akun Instagram: @${accountName}`);
 
     // 2. KLIK TOMBOL LIKE
     console.log('2. Mencoba klik Like...');
@@ -161,11 +209,12 @@ async function processPost(page, rawUrl, commentText, screenshotsDir) {
     // Tambahan jeda 4 detik agar komentar baru benar-benar tampil di daftar komentar sebelum dipotret
     await page.waitForTimeout(4000);
 
-    // 7. SIMPAN SCREENSHOT BERDASARKAN BULAN POSTINGAN
-    console.log(`7. Mengambil screenshot bukti ke folder: ${folderName}...`);
+    // 7. SIMPAN SCREENSHOT BERDASARKAN HIERARKI: BULAN -> ID AKUN -> TANGGAL POST
+    console.log(`7. Mengambil screenshot bukti ke folder: [${folderName}] -> [${accountName}] -> [${postDateISO}]...`);
 
-    // Buat folder bulan di dalam screenshots (contoh: screenshots/Oktober 2024)
-    const targetDir = path.join(screenshotsDir, folderName);
+    // Buat folder hierarki 3 level: screenshots / Bulan Tahun / ID Akun / Tanggal Post
+    // Jika folder bulan atau folder akun sudah exist, fs.mkdirSync recursive otomatis lanjut membuat subfolder di dalamnya
+    const targetDir = path.join(screenshotsDir, folderName, accountName, postDateISO);
     if (!fs.existsSync(targetDir)) {
         fs.mkdirSync(targetDir, { recursive: true });
     }
@@ -183,7 +232,10 @@ async function processPost(page, rawUrl, commentText, screenshotsDir) {
         status: 'success',
         file: screenshotPath,
         postDate: postDateISO,
-        folderName: folderName,
+        folderName: folderName,              // Level 1: Bulan & Tahun (contoh: "Oktober 2026")
+        accountName: accountName,            // Level 2: ID Akun Instagram (contoh: "interactivetech")
+        dateFolderName: postDateISO,         // Level 3: Tanggal Postingan (contoh: "2026-10-30")
+        folderChain: [folderName, accountName, postDateISO], // Hierarki lengkap
         comment: commentText,
         url: postUrl
     };
@@ -193,10 +245,11 @@ async function processPost(page, rawUrl, commentText, screenshotsDir) {
 if (require.main === module) {
     const rawUrl = process.argv[2];
     let commentText = process.argv[3];
+    const targetAccount = process.argv[4] || null;
 
     if (!rawUrl) {
         console.log('Penggunaan:');
-        console.log('  Mode 1 Post:   node ig-bot.js <POST_URL> [COMMENT_TEXT]');
+        console.log('  Mode 1 Post:   node ig-bot.js <POST_URL> [COMMENT_TEXT] [TARGET_ACCOUNT]');
         console.log('  Mode Otomatis: node run-batch.js (atau node uri-comment.js)');
         process.exit(1);
     }
@@ -231,7 +284,7 @@ if (require.main === module) {
         const page = context.pages()[0] || await context.newPage();
 
         try {
-            const result = await processPost(page, rawUrl, commentText, screenshotsDir);
+            const result = await processPost(page, rawUrl, commentText, screenshotsDir, targetAccount);
             console.log(`RESULT_JSON:${JSON.stringify(result)}`);
         } catch (err) {
             console.error('Terjadi error:', err);
