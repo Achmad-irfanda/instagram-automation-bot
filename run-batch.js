@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { comments, urlPost } = require('./uri-comment');
 const { processPost } = require('./ig-bot');
-const { uploadScreenshot } = require('./google-drive');
+const { uploadScreenshot, getAccessToken } = require('./google-drive');
 
 // Jeda aman (dalam detik) antar postingan agar akun tidak terkena spam detection Instagram
 const MIN_DELAY_SECONDS = 10;
@@ -45,6 +45,15 @@ function pickRandomComment(list, usedSet) {
     const screenshotsDir = path.join(__dirname, 'screenshots');
     if (!fs.existsSync(screenshotsDir)) {
         fs.mkdirSync(screenshotsDir, { recursive: true });
+    }
+
+    // Cek kesiapan autentikasi Google Drive di awal (auto-refresh token)
+    try {
+        await getAccessToken();
+        console.log('☁️  [Drive] Autentikasi Google Drive terhubung & token siap digunakan.\n');
+    } catch (tokenErr) {
+        console.log(`⚠️ [Drive] Peringatan autentikasi Google Drive: ${tokenErr.message}`);
+        console.log(`   (Screenshot akan tetap disimpan di lokal dan dapat disinkronkan nanti via "npm run sync-drive")\n`);
     }
 
     // Buka browser satu kali untuk seluruh sesi agar cepat dan efisien

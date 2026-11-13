@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node run-batch.js",
     "login": "node login.js",
+    "auth-drive": "node auth-gdrive.js",
     "sync-drive": "node google-drive.js"
   },
   "repository": {

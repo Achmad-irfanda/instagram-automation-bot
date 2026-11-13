@@ -53,8 +53,30 @@ const comments = [
 
 
 const urlPost = [
-  "https://www.instagram.com/reels/DcGp0b2pZoD/",
-  "https://www.instagram.com/reels/De6q-vLzmU5/"
+  "https://www.instagram.com/p/DfHK5t1Ekho/",
+  "https://www.instagram.com/p/DfErvDAEv-w/",
+  "https://www.instagram.com/p/DfCHDEZOf3o/",
+  "https://www.instagram.com/p/DfBVPIEkmzM/",
+  "https://www.instagram.com/p/De_h-fDEqOm/",
+  "https://www.instagram.com/p/De8wSeZEr6W/",
+  "https://www.instagram.com/p/De1VMgGkrZQ/",
+  "https://www.instagram.com/p/DeyvvAKktCJ/",
+  "https://www.instagram.com/p/DewEqq_EvH2/",
+  "https://www.instagram.com/p/DetjmrzOsiH/",
+  "https://www.instagram.com/p/Detd_kiElhk/",
+  "https://www.instagram.com/p/DeqwihoEsWv/",
+  "https://www.instagram.com/p/DejNWMhEvMa/",
+  "https://www.instagram.com/p/DegrpJaOqZr/",
+  "https://www.instagram.com/p/DeeEKyjEpE-/",
+  "https://www.instagram.com/p/DebdvGKj6M3/",
+  "https://www.instagram.com/p/DeY8O1Bj6Ry/",
+  "https://www.instagram.com/p/DeRDZynkvcu/",
+  "https://www.instagram.com/p/DeOouF8kp-s/",
+  "https://www.instagram.com/p/DeMHUUPkkbT/",
+  "https://www.instagram.com/p/DeJg11MkrYi/",
+  "https://www.instagram.com/p/DeG3o_CD3Q5/",
+  "https://www.instagram.com/p/Dd_OlzEEudq/",
+  "https://www.instagram.com/p/Dd8mklmEjwZ/"
 ];
 
 module.exports = { comments, urlPost };

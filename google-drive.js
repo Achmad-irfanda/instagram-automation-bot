@@ -61,15 +61,20 @@ function cleanupEmptyDir(startDirPath) {
 
 /**
  * Mendapatkan Access Token aktif (auto-refresh menggunakan Refresh Token)
+ * @param {boolean} forceRefresh - Paksa perbarui access token dari Google OAuth
  */
-async function getAccessToken() {
+async function getAccessToken(forceRefresh = false) {
     const now = Date.now();
-    // Gunakan cache jika token masih valid (dengan buffer 60 detik)
-    if (cachedAccessToken && now < tokenExpiryTime - 60000) {
+    // Gunakan cache jika token masih valid (dengan buffer 300 detik / 5 menit) dan tidak diminta force
+    if (!forceRefresh && cachedAccessToken && now < tokenExpiryTime - 300000) {
         return cachedAccessToken;
     }
 
     const config = loadConfig();
+    if (!config.clientId || !config.clientSecret || !config.refreshToken) {
+        throw new Error('Konfigurasi gdrive-auth.json tidak lengkap (clientId, clientSecret, atau refreshToken kosong).');
+    }
+
     const postData = new URLSearchParams({
         client_id: config.clientId,
         client_secret: config.clientSecret,
@@ -94,10 +99,22 @@ async function getAccessToken() {
                         cachedAccessToken = json.access_token;
                         tokenExpiryTime = Date.now() + (json.expires_in * 1000);
                         resolve(cachedAccessToken);
+                    } else if (json.error === 'invalid_grant') {
+                        cachedAccessToken = null;
+                        tokenExpiryTime = 0;
+                        reject(new Error(
+                            `Refresh Token Google Drive tidak valid / telah kadaluarsa (invalid_grant: "${json.error_description || 'Token has been expired or revoked'}").\n` +
+                            `   👉 Solusi Cepat: Jalankan "node auth-gdrive.js" di terminal untuk login & perbarui token baru otomatis.\n` +
+                            `   💡 Tips: Jika status GCP OAuth Consent Screen masih "Testing", token akan kadaluarsa setiap 7 hari. Ubah status ke "In production" di Google Cloud Console agar token permanen.`
+                        ));
                     } else {
+                        cachedAccessToken = null;
+                        tokenExpiryTime = 0;
                         reject(new Error(`Gagal mendapatkan token: ${body}`));
                     }
                 } catch (e) {
+                    cachedAccessToken = null;
+                    tokenExpiryTime = 0;
                     reject(new Error(`Gagal parsing respon token: ${body}`));
                 }
             });
@@ -110,14 +127,37 @@ async function getAccessToken() {
 }
 
 /**
- * Request HTTP Helper untuk Google Drive API
+ * Memaksa perbaruan access token secara eksplisit sebelum operasi pengiriman
+ */
+async function refreshAccessToken(force = true) {
+    return await getAccessToken(force);
+}
+
+/**
+ * Request HTTP Helper untuk Google Drive API dengan auto-retry jika access token kadaluarsa (401)
  */
 function driveApiRequest(options, postBody = null) {
     return new Promise((resolve, reject) => {
-        const req = https.request(options, (res) => {
+        const req = https.request(options, async (res) => {
             let body = '';
             res.on('data', chunk => body += chunk);
-            res.on('end', () => {
+            res.on('end', async () => {
+                // Auto-retry 1x jika token expired (401 Unauthorized)
+                if (res.statusCode === 401 && !options._retried) {
+                    try {
+                        console.log('   🔄 Access token kadaluarsa (401), melakukan refresh token otomatis & mencoba ulang...');
+                        cachedAccessToken = null;
+                        tokenExpiryTime = 0;
+                        const freshToken = await getAccessToken(true);
+                        const newHeaders = { ...(options.headers || {}), Authorization: `Bearer ${freshToken}` };
+                        const retryOptions = { ...options, headers: newHeaders, _retried: true };
+                        const retryRes = await driveApiRequest(retryOptions, postBody);
+                        return resolve(retryRes);
+                    } catch (retryErr) {
+                        return reject(retryErr);
+                    }
+                }
+
                 try {
                     const json = body ? JSON.parse(body) : {};
                     if (res.statusCode >= 200 && res.statusCode < 300) {
@@ -243,14 +283,16 @@ async function findOrCreateMonthFolder(targetFolderName, parentFolderId = null) 
  *
  * Otomatis mengecek jika file dengan nama yang sama sudah pernah ter-upload.
  */
-async function uploadScreenshot(filePath, folderHierarchy, parentFolderId = null) {
+async function uploadScreenshot(filePath, folderHierarchy, parentFolderId = null, options = {}) {
     if (!parentFolderId) parentFolderId = getParentFolderId();
     if (!fs.existsSync(filePath)) {
         throw new Error(`File tidak ditemukan: ${filePath}`);
     }
 
     const fileName = path.basename(filePath);
-    const token = await getAccessToken();
+
+    // Pastikan token valid & aktif sebelum memulai proses folder & upload
+    const token = await getAccessToken(options.forceRefresh || false);
 
     // 1. Buat / telusuri rantai folder bertingkat (Bulan -> Akun -> Tanggal)
     const folderChain = normalizeFolderChain(folderHierarchy);
@@ -432,6 +474,7 @@ if (require.main === module) {
 
 module.exports = {
     getAccessToken,
+    refreshAccessToken,
     findOrCreateFolder,
     findOrCreateMonthFolder,
     uploadScreenshot,

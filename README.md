@@ -82,7 +82,7 @@ node login.js
 
 ---
 
-## ☁️ Konfigurasi Google Drive (GCP OAuth)
+### 4. Setup Autentikasi Google Drive (OAuth)
 
 Agar tangkapan layar bukti interaksi dapat otomatis diunggah ke Google Drive:
 
@@ -93,21 +93,18 @@ Agar tangkapan layar bukti interaksi dapat otomatis diunggah ke Google Drive:
    ```text
    http://localhost:5678/rest/oauth2-credential/callback
    ```
-5. Dapatkan `Client ID` dan `Client Secret`.
-6. Salin template konfigurasi:
+5. Salin `Client ID` dan `Client Secret` ke file `gdrive-auth.json` (atau letakkan file `client_secret_*.json` langsung di root folder).
+6. Dapatkan **Refresh Token** secara otomatis hanya dengan satu perintah:
    ```bash
-   cp gdrive-auth.example.json gdrive-auth.json
+   npm run auth-drive
+   # atau: node auth-gdrive.js
    ```
-7. Buka file `gdrive-auth.json` dan isi nilai yang sesuai:
-   ```json
-   {
-     "clientId": "YOUR_GCP_CLIENT_ID.apps.googleusercontent.com",
-     "clientSecret": "YOUR_GCP_CLIENT_SECRET",
-     "refreshToken": "YOUR_GCP_REFRESH_TOKEN",
-     "parentFolderId": "ID_FOLDER_GOOGLE_DRIVE_TUJUAN"
-   }
-   ```
-   *(ID Folder tujuan diambil dari URL Google Drive Anda, misalnya: `https://drive.google.com/drive/folders/1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTuVw` -> ID-nya adalah `1a2B3c4D5e6F7g8H9i0JkLmNoPqRsTuVw`)*.
+   Browser akan terbuka otomatis untuk login Google Drive Anda. Setelah mengizinkan akses, Refresh Token akan otomatis disimpan ke `gdrive-auth.json`.
+7. Masukkan ID folder Google Drive tujuan Anda pada properti `parentFolderId` di `gdrive-auth.json`.
+
+> [!TIP]
+> **Mencegah Token Expired tiap 7 Hari:**
+> Di Google Cloud Console, masuk ke menu **APIs & Services > OAuth consent screen** lalu klik **"Publish App"** (ubah status dari *Testing* ke *In production*). Status *Production* memastikan refresh token aktif secara permanen dan tidak kadaluarsa setelah 7 hari.
 
 > [!IMPORTANT]
 > File `gdrive-auth.json` sudah dimasukkan ke `.gitignore` sehingga data rahasia (*Client Secret* & *Refresh Token*) Anda tidak akan pernah bocor ke publik.

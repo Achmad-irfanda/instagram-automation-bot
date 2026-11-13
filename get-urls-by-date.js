@@ -54,13 +54,14 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
                         const targetNorm = targetUsername.toLowerCase().trim();
                         const ownerNorm = currentOwner ? currentOwner.toLowerCase().trim() : null;
 
-                        if (!ownerNorm || ownerNorm === targetNorm) {
-                            const postDate = new Date(timestamp * 1000);
-                            const dateStr = postDate.toISOString().split('T')[0];
-                            const postUrl = `https://www.instagram.com/p/${code}/`;
-                            if (!apiPosts.has(code)) {
-                                apiPosts.set(code, { url: postUrl, date: dateStr, postDate, owner: currentOwner || targetUsername });
-                            }
+                        // Abaikan jika postingan terdeteksi milik akun lain (misal suggested post / iklan)
+                        if (ownerNorm && ownerNorm !== targetNorm) return;
+
+                        const postDate = new Date(timestamp * 1000);
+                        const dateStr = postDate.toISOString().split('T')[0];
+                        const postUrl = `https://www.instagram.com/p/${code}/`;
+                        if (!apiPosts.has(code)) {
+                            apiPosts.set(code, { url: postUrl, date: dateStr, postDate, owner: ownerNorm || targetUsername });
                         }
                     }
                 }
@@ -182,26 +183,76 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
                     continue;
                 }
 
-                // Kalau belum ada di cache API, buka sebentar untuk ambil <time>
+                // Kalau belum ada di cache API, buka sebentar untuk ambil author & datetime
                 try {
                     await page.goto(postUrl, { waitUntil: 'commit', timeout: 25000 });
                     await page.waitForSelector('time[datetime]', { timeout: 10000 });
 
-                    const datetime = await page.evaluate(() => {
-                        const allTimes = Array.from(document.querySelectorAll('time[datetime]'));
-                        return allTimes.length > 0 ? allTimes[allTimes.length - 1].getAttribute('datetime') : null;
+                    const postInfo = await page.evaluate(() => {
+                        let author = null;
+                        const headerAuthor = document.querySelector('header a[role="link"], article header a');
+                        if (headerAuthor) {
+                            const href = headerAuthor.getAttribute('href');
+                            if (href) {
+                                const clean = href.replace(/^\/+|\/+$/g, '').split('/')[0].split('?')[0];
+                                const blacklist = ['explore', 'reels', 'stories', 'direct', 'accounts', 'p', 'reel'];
+                                if (clean && !blacklist.includes(clean.toLowerCase())) {
+                                    author = clean;
+                                }
+                            }
+                            if (!author && headerAuthor.textContent) {
+                                const text = headerAuthor.textContent.trim();
+                                if (text && !text.includes(' ') && text.length <= 30) {
+                                    author = text;
+                                }
+                            }
+                        }
+                        if (!author) {
+                            const ogTitle = document.querySelector('meta[property="og:title"]');
+                            if (ogTitle) {
+                                const content = ogTitle.getAttribute('content') || '';
+                                const match = content.match(/^([^•|:(@\n]+?)(?:\s+on Instagram|\s*\()/i);
+                                if (match && match[1]) {
+                                    const candidate = match[1].trim();
+                                    if (!candidate.includes(' ') && candidate.length <= 30) {
+                                        author = candidate;
+                                    }
+                                }
+                            }
+                        }
+
+                        let datetime = null;
+                        const postTimeLink = document.querySelector('a[href*="/p/"] time[datetime], a[href*="/reel/"] time[datetime]');
+                        if (postTimeLink) {
+                            datetime = postTimeLink.getAttribute('datetime');
+                        } else {
+                            const allTimes = Array.from(document.querySelectorAll('time[datetime]'));
+                            if (allTimes.length > 0) {
+                                datetime = allTimes[allTimes.length - 1].getAttribute('datetime');
+                            }
+                        }
+                        return { author, datetime };
                     });
 
-                    if (datetime && code) {
-                        const postDate = new Date(datetime);
-                        const dateStr = datetime.split('T')[0];
-                        console.log(`[Cek Manual ${i + 1}/${domUrlArray.length}] ${postUrl} -> Tanggal: ${dateStr}`);
-                        apiPosts.set(code, { url: postUrl, date: dateStr, postDate });
+                    if (postInfo && postInfo.datetime && code) {
+                        const postDate = new Date(postInfo.datetime);
+                        const dateStr = postInfo.datetime.split('T')[0];
+                        const targetNorm = targetUsername.toLowerCase().trim();
+                        const authorNorm = postInfo.author ? postInfo.author.toLowerCase().trim() : null;
+
+                        // Verifikasi ketat kepemilikan postingan! Jika milik akun lain (misal suggested post), abaikan!
+                        if (authorNorm && authorNorm !== targetNorm) {
+                            console.log(`[Cek Manual ${i + 1}/${domUrlArray.length}] ⏭️ Melewati ${postUrl} (Milik @${postInfo.author}, bukan @${targetUsername})`);
+                            continue;
+                        }
+
+                        console.log(`[Cek Manual ${i + 1}/${domUrlArray.length}] ${postUrl} -> Tanggal: ${dateStr} (@${postInfo.author || targetUsername})`);
+                        apiPosts.set(code, { url: postUrl, date: dateStr, postDate, owner: postInfo.author || targetUsername });
 
                         if (postDate < startDate && i >= 3) {
                             consecutiveOld++;
                             if (consecutiveOld >= 2) {
-                                console.log('-> Sudah melewati batas tanggal awal, berhenti mengecxek!');
+                                console.log('-> Sudah melewati batas tanggal awal, berhenti mengecek!');
                                 break;
                             }
                         } else {
@@ -214,13 +265,18 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
             }
         }
 
-        // 3. FILTER HASIL AKHIR SESUAI TANGGAL
+        // 3. FILTER HASIL AKHIR SESUAI TANGGAL & VERIFIKASI AKUN TARGET
         collectedData = [];
+        const targetNorm = targetUsername.toLowerCase().trim();
         console.log(`\nMemfilter total ${apiPosts.size} postingan untuk rentang ${startDateStr} s/d ${endDateStr}...`);
 
         for (const item of apiPosts.values()) {
+            const ownerNorm = item.owner ? item.owner.toLowerCase().trim() : targetNorm;
+            // Cegah akun lain lolos
+            if (ownerNorm !== targetNorm) continue;
+
             if (item.postDate >= startDate && item.postDate <= endDate) {
-                console.log(`✅ COCOK: ${item.url} -> Tanggal: ${item.date}`);
+                console.log(`✅ COCOK: ${item.url} -> Tanggal: ${item.date} (@${item.owner})`);
                 collectedData.push({ url: item.url, date: item.date, account: targetUsername });
             }
         }
@@ -231,19 +287,23 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
         console.log(`\n🎉 Selesai! Berhasil menyimpan ${collectedData.length} postingan ke:`);
         console.log(`   ${outputPath}`);
 
-        // 4. OTOMATIS INSERT KE uri-comment.js
-        if (collectedData.length > 0) {
-            const uriCommentPath = path.join(__dirname, 'uri-comment.js');
-            if (fs.existsSync(uriCommentPath)) {
-                let content = fs.readFileSync(uriCommentPath, 'utf8');
-                const urlsFormatted = collectedData.map(item => `  "${item.url}"`).join(',\n');
-                const newUrlPostBlock = `const urlPost = [\n${urlsFormatted}\n];`;
-                content = content.replace(/const urlPost\s*=\s*\[[\s\S]*?\];/g, newUrlPostBlock);
-                fs.writeFileSync(uriCommentPath, content, 'utf8');
+        // 4. OTOMATIS INSERT / RESET KE uri-comment.js
+        const uriCommentPath = path.join(__dirname, 'uri-comment.js');
+        if (fs.existsSync(uriCommentPath)) {
+            let content = fs.readFileSync(uriCommentPath, 'utf8');
+            const urlsFormatted = collectedData.map(item => `  "${item.url}"`).join(',\n');
+            const newUrlPostBlock = collectedData.length > 0
+                ? `const urlPost = [\n${urlsFormatted}\n];`
+                : `const urlPost = [\n\n];`;
+            content = content.replace(/const urlPost\s*=\s*\[[\s\S]*?\];/g, newUrlPostBlock);
+            fs.writeFileSync(uriCommentPath, content, 'utf8');
+
+            if (collectedData.length > 0) {
                 console.log(`\n📝 [Auto-Insert] Berhasil memasukkan ${collectedData.length} URL ke dalam 'urlPost' di uri-comment.js!`);
+            } else {
+                console.log(`\n⚠️ Tidak ada postingan dari @${targetUsername} yang cocok dalam rentang ${startDateStr} s/d ${endDateStr}.`);
+                console.log(`   🧹 Daftar 'urlPost' di uri-comment.js telah dikosongkan agar tidak mengeksekusi postingan lama.`);
             }
-        } else {
-            console.log(`\n⚠️ Tidak ada postingan yang cocok dalam rentang tanggal tersebut.`);
         }
 
     } catch (err) {
@@ -254,13 +314,17 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
     }
 
     // 5. OTOMATIS JALANKAN EKSEKUSI JIKA PARAMETER --run DIGUNAKAN
-    if (autoRun && collectedData && collectedData.length > 0) {
-        console.log(`\n===============================================================`);
-        console.log(`🚀 [Auto-Run] Memulai eksekusi otomatis postingan yang baru di-crawl...`);
-        console.log(`👤 Target Akun: @${targetUsername}`);
-        console.log(`===============================================================\n`);
-        const { spawnSync } = require('child_process');
-        spawnSync('node', [path.join(__dirname, 'run-batch.js'), targetUsername], { stdio: 'inherit' });
+    if (autoRun) {
+        if (collectedData && collectedData.length > 0) {
+            console.log(`\n===============================================================`);
+            console.log(`🚀 [Auto-Run] Memulai eksekusi otomatis postingan yang baru di-crawl...`);
+            console.log(`👤 Target Akun: @${targetUsername}`);
+            console.log(`===============================================================\n`);
+            const { spawnSync } = require('child_process');
+            spawnSync('node', [path.join(__dirname, 'run-batch.js'), targetUsername], { stdio: 'inherit' });
+        } else {
+            console.log(`\n🛑 [Auto-Run Dibatalkan] Tidak ada postingan yang ditemukan dari @${targetUsername} untuk rentang tanggal tersebut.`);
+        }
     } else if (!autoRun && collectedData && collectedData.length > 0) {
         console.log(`\n💡 Ingin langsung like, komen, & upload ke Drive otomatis setelah crawling?`);
         console.log(`   Tambahkan parameter '--run' di akhir perintah:`);
