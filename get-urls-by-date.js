@@ -24,34 +24,49 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
 
     const page = context.pages()[0] || await context.newPage();
     let apiPosts = new Map();
+    let collectedData = [];
 
     // 1. SADAP KHUSUS ENDPOINT DATA INSTAGRAM (Ringan & Tidak Bikin Browser Hang)
     page.on('response', async (response) => {
         const url = response.url();
-        // Hanya periksa URL yang pasti berisi data JSON daftar postingan
+        // Hanya periksa URL yang pasti berisi data JSON daftar postingan profil dan abaikan timeline/beranda
         if (!url.includes('graphql') && !url.includes('/api/v1/feed/')) return;
+        if (url.includes('/api/v1/feed/timeline/') || url.includes('reels_tray') || url.includes('/api/v1/feed/stories/')) return;
 
         try {
             const json = await response.json();
-            const findPosts = (obj) => {
+            const findPosts = (obj, parentOwner = null) => {
                 if (!obj || typeof obj !== 'object') return;
+
+                let currentOwner = parentOwner;
+                if (obj.user && obj.user.username) {
+                    currentOwner = obj.user.username;
+                } else if (obj.owner && obj.owner.username) {
+                    currentOwner = obj.owner.username;
+                }
 
                 const code = obj.shortcode || obj.code;
                 const timestamp = obj.taken_at_timestamp || obj.taken_at || (obj.caption && obj.caption.created_at);
 
                 if (code && timestamp && typeof code === 'string' && code.length >= 8 && code.length <= 15 && typeof timestamp === 'number') {
                     if (obj.media_type || obj.display_url || obj.image_versions2 || obj.carousel_media || obj.video_versions || obj.__typename) {
-                        const postDate = new Date(timestamp * 1000);
-                        const dateStr = postDate.toISOString().split('T')[0];
-                        const postUrl = `https://www.instagram.com/p/${code}/`;
-                        if (!apiPosts.has(code)) {
-                            apiPosts.set(code, { url: postUrl, date: dateStr, postDate });
+                        // Filter kepemilikan postingan: jika ada username pembuat, wajib cocok dengan targetUsername!
+                        const targetNorm = targetUsername.toLowerCase().trim();
+                        const ownerNorm = currentOwner ? currentOwner.toLowerCase().trim() : null;
+
+                        if (!ownerNorm || ownerNorm === targetNorm) {
+                            const postDate = new Date(timestamp * 1000);
+                            const dateStr = postDate.toISOString().split('T')[0];
+                            const postUrl = `https://www.instagram.com/p/${code}/`;
+                            if (!apiPosts.has(code)) {
+                                apiPosts.set(code, { url: postUrl, date: dateStr, postDate, owner: currentOwner || targetUsername });
+                            }
                         }
                     }
                 }
 
                 for (const key in obj) {
-                    findPosts(obj[key]);
+                    findPosts(obj[key], currentOwner);
                 }
             };
             findPosts(json);
@@ -75,7 +90,7 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
 
         console.log('Menunggu 12 postingan pertama muncul di layar...');
         for (let wait = 0; wait < 30; wait++) {
-            const linkCount = await page.$$eval('a[href*="/p/"], a[href*="/reel/"]', el => el.length).catch(() => 0);
+            const linkCount = await page.$$eval('main a[href*="/p/"], main a[href*="/reel/"]', el => el.length).catch(() => 0);
             if (linkCount > 0) break;
             await page.waitForTimeout(2000);
         }
@@ -93,7 +108,7 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
             scrollAttempts++;
 
             // Kumpulkan juga link dari DOM layar sebagai cadangan jika API cuma dapat 12
-            const hrefs = await page.$$eval('a[href*="/p/"], a[href*="/reel/"]', links =>
+            const hrefs = await page.$$eval('main a[href*="/p/"], main a[href*="/reel/"]', links =>
                 links.map(el => el.href)
             ).catch(() => []);
             hrefs.forEach(u => allDomUrls.add(u));
@@ -200,7 +215,7 @@ const endDate = new Date(`${endDateStr}T23:59:59Z`);
         }
 
         // 3. FILTER HASIL AKHIR SESUAI TANGGAL
-        let collectedData = [];
+        collectedData = [];
         console.log(`\nMemfilter total ${apiPosts.size} postingan untuk rentang ${startDateStr} s/d ${endDateStr}...`);
 
         for (const item of apiPosts.values()) {
